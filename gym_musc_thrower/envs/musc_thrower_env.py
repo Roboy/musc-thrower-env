@@ -2,7 +2,7 @@ import gym
 from gym import error, spaces, utils, logger
 from gym.utils import seeding
 import rclpy
-from std_msgs.msg import Int32, Bool
+from std_msgs.msg import Int32, Bool, Float64
 from std_srvs.srv import Empty, Trigger
 from gazebo_msgs.msg import LinkStates
 from sensor_msgs.msg import JointState
@@ -22,8 +22,10 @@ class MuscThrowerEnv(gym.Env):
         # self.delete_srv = self.node.create_client(DeleteModel, '/gazebo/delete_model')
         # self.reset_srv = self.node.create_client(Empty, "/gazebo/reset_simulation")
         self.com_srv = self.node.create_client(GetLinkState, "/gazebo/get_link_state")
+        self.unpause_srv = self.node.create_client(Empty, "/gazebo/unpause_physics")
         # self.link_states_sub = self.node.create_subscription(LinkStates, "/gazebo/link_states", self.link_states_cb)
         self.joint_states_sub = self.node.create_subscription(JointState, "/joint_states", self.joint_states_cb)
+        self.ball_sub = self.node.create_subscription(Float64, "/roboy/simulation/ball/speed", self.ball_speed_cb)
         self.step_srv = self.node.create_client(Trigger, "/roboy/simulation/step")
         self.detach_srv = self.node.create_client(Trigger, "/roboy/simulation/joint/detach")
         self.atach_srv = self.node.create_client(Trigger, "/roboy/simulation/joint/atach")
@@ -65,12 +67,12 @@ class MuscThrowerEnv(gym.Env):
         self.ball_detached = False
         self.ball_hit_ground = False
         self.ball_hit_location = None
-        for srv in [self.step_srv, self.atach_srv, self.detach_srv, self.com_srv]:
+        for srv in [self.unpause_srv, self.step_srv, self.atach_srv, self.detach_srv, self.com_srv]:
             while not srv.wait_for_service(timeout_sec=1.0):
                 self.node.get_logger().info('%s service not available, waiting again...'%srv.srv_name)
 
         self.reset()
-
+        self.base_xyz = self.get_body_com("musc-le-ball::base")
 
         print("init done")
 
@@ -80,7 +82,7 @@ class MuscThrowerEnv(gym.Env):
 
     def step(self, action):
         self.curr_episode += 1
-        print("episode %i"%(self.curr_episode))
+        # print("episode %i"%(self.curr_episode))
 
         self.do_simulation(action)
         done = False
@@ -92,9 +94,9 @@ class MuscThrowerEnv(gym.Env):
         if (self.curr_episode == 0):
             self.prev_ball_xyz = self.ball_xyz
 
-        self.upper_link_xyz = self.get_body_com("musc-le-ball::upper_arm")
-        ball_xy = self.ball_xyz[:2]
-        ee_xy = self.upper_link_xyz[:2]
+
+        ball_y = self.ball_xyz[1]
+
 
         if self.ball_xyz[2] <= 0.055:
             self.ball_hit_ground = True
@@ -112,7 +114,10 @@ class MuscThrowerEnv(gym.Env):
             # print(np.linalg.norm(ball_xy - ee_xy))
         # else:
         # if self.ball_detached and
-        reward = np.linalg.norm(ball_xy - ee_xy)
+            # reward = 100*np.linalg.norm(ball_y - self.base_xyz[1])
+        reward = self.ball_speed
+        if (abs(self.ball_speed) < 0.001):
+            reward = -1
 
         # reward += np.linalg.norm(self.prev_ball_xyz[:2] - self.ball_xyz[:2])
         # else:  # still attached
@@ -127,11 +132,11 @@ class MuscThrowerEnv(gym.Env):
 
     def do_simulation(self, action):
 
-        print("Action: ")
-        print(action)
+        # print("Action: ")
+        # print(action)
         self.motor_command.set_points = [(x+2.5)*100.0 for x in action[:4]]
         self.command_pub.publish(self.motor_command)
-        if (not self.ball_detached and action[-1] < 0):
+        if (not self.ball_detached and action[-1] > 0.9):
             # import pdb; pdb.set_trace()
             print("RELEASED")
             # msg = Bool()
@@ -155,9 +160,12 @@ class MuscThrowerEnv(gym.Env):
         #     # self.step_pub.publish(msg)
         ball_xyz = self.get_body_com("musc-le-ball::ball")
         obs = np.concatenate((self.joint_pos, self.joint_vel)) #np.append(np.concatenate((self.joint_pos, self.joint_vel)), ball_xyz)
-        print("Observation: ")
-        print(obs)
+        # print("Observation: ")
+        # print(obs)
         return obs
+
+    def ball_speed_cb(self, msg):
+        self.ball_speed = msg.data
 
     def link_states_cb(self, msg):
         # print("updated link states")
@@ -211,6 +219,10 @@ class MuscThrowerEnv(gym.Env):
         rclpy.spin_until_future_complete(self.node, future)
         # import pdb; pdb.set_trace()
         self.ball_detached = False
+
+        req = Empty.Request()
+        future = self.unpause_srv.call_async(req)
+        rclpy.spin_until_future_complete(self.node, future)
         #     rclpy.spin_until_future_complete(self.node, future)
 
         # self.spawn_srv = self.node.create_client(SpawnModel, '/gazebo/spawn_sdf_model')
