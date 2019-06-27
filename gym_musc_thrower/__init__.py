@@ -4,3 +4,8 @@ register(
     id='musc-thrower-v0',
     entry_point='gym_musc_thrower.envs:MuscThrowerEnv',
 )
+
+register(
+    id='biker-v0',
+    entry_point='gym_musc_thrower.envs:BikingEnv',
+)

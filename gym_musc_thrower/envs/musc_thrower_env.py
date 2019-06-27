@@ -82,7 +82,7 @@ class MuscThrowerEnv(gym.Env):
 
     def step(self, action):
         self.curr_episode += 1
-        # print("episode %i"%(self.curr_episode))
+        print("episode %i"%(self.curr_episode))
 
         self.do_simulation(action)
         done = False
