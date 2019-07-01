@@ -12,12 +12,12 @@ env = DummyVecEnv([lambda: env])  # The algorithms require a vectorized environm
 
 from stable_baselines.common.policies import ActorCriticPolicy, FeedForwardPolicy, MlpPolicy, CnnPolicy
 model = PPO2(MlpPolicy, env, verbose=1, tensorboard_log="./throwing_tensorboard_ppo/")#, normalize_returns=True, reward_scale=10.0)
-model.learn(total_timesteps=1000000)
+model.learn(total_timesteps=500)
 model.save("test")
 print("learn done")
 print()
 obs = env.reset()
-for i in range(1000):
+for i in range(10):
     print("step %i"%i)
     action, _states = model.predict(obs)
     print(action)

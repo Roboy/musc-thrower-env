@@ -6,6 +6,7 @@ from gym.utils import seeding
 import rospy
 from std_srvs.srv import Empty, Trigger, EmptyRequest, TriggerRequest
 from std_msgs.msg import Float64
+import time
 
 class MuscThrowerEnv(MuscEnv):
     metadata = {'render.modes': ['human']}
@@ -30,8 +31,8 @@ class MuscThrowerEnv(MuscEnv):
         self.action_space = spaces.Box(low=low, high=high, dtype=np.float32) # spaces.MultiDiscrete([500, 500, 500, 500, 2])
         # self.action_space =spaces.MultiDiscrete([500, 500, 500, 500, 5])
         # self.action_space = spaces.Box(np.array([0]*5), np.array([500]*5))
-        low = np.array([-1.0472, -1.39626, (-1)*np.inf, (-1)*np.inf])#, (-1)*np.inf, (-1)*np.inf, (-1)*np.inf])
-        high = np.array([1.0472, 1.39626, np.inf, np.inf])#, np.inf, np.inf, np.inf])
+        low = np.array([ -1.0472, -1.39626,-5.0, -5.0])# , (-1)*np.inf, (-1)*np.inf, (-1)*np.inf])
+        high = np.array([1.0472, 1.39626,5.0, 5.0])#, np.inf, np.inf, np.inf])
         self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
         # self.joint_pos = None
@@ -44,7 +45,8 @@ class MuscThrowerEnv(MuscEnv):
         self.ball_hit_ground = False
         self.ball_hit_location = None
         self.ball_speed = 0
-        super().__init__(4, True)
+        super().__init__(4, False)
+        self.step_gazebo = False
         self.base_xyz = self.get_body_com("musc-le-ball::base")
         print("init done")
 
@@ -76,7 +78,11 @@ class MuscThrowerEnv(MuscEnv):
 
         if self.ball_hit_ground:
             print("hit")
+            reward = abs(ball_y)
+            # reward = self.flying_speed
             done = True
+        else:
+            reward = 0.0
         #     ball_hit_xy = self.ball_hit_location[:2]
         #     reward = np.linalg.norm(ball_hit_xy - ee_xy)
         # elif self.ball_detached:  # flying
@@ -87,27 +93,34 @@ class MuscThrowerEnv(MuscEnv):
         # else:
         # if self.ball_detached and
             # reward = 100*np.linalg.norm(ball_y - self.base_xyz[1])
-        reward = self.ball_speed
-        if (abs(self.ball_speed) < 0.001):
-            reward = -1
+
+
+        # reward /= 2.0
+        # if (abs(reward) < 0.001):
+        #     reward = 0
+        # else:
+        #     reward += abs(ball_y)
 
         # reward += np.linalg.norm(self.prev_ball_xyz[:2] - self.ball_xyz[:2])
         # else:  # still attached
         #     print("still attached")
         #     reward = 0
 
-        print("reward: %f"%reward)
+        print("\n====== \n reward: %f \n======= \n"%reward)
 
         observations = self.get_observations()
+
 
         return observations, reward, done, dict(reward=reward, episode=self.curr_episode)
 
     def do_simulation(self, action):
 
+        # time.sleep(1)
         # print("Action: ")
         # print(action)
         self.motor_command.set_points = [(x+2.5)*100.0 for x in action[:4]]
         self.command_pub.publish(self.motor_command)
+        time.sleep(0.5)
         if (not self.ball_detached and action[-1] > 0.9):
             # import pdb; pdb.set_trace()
             print("RELEASED")
@@ -117,10 +130,24 @@ class MuscThrowerEnv(MuscEnv):
             future = self.detach_srv(TriggerRequest())
             #rclpy.spin_until_future_complete(self.node, future)
             self.ball_detached = True
+            self.ball_xyz = self.get_body_com("musc-le-ball::ball")
+            # import pdb; pdb.set_trace()
+            self.flying_speed = 0
+            i = 0.0
+            while self.ball_xyz[2] >= 0.055:
+                i += 1
+                # import pdb; pdb.set_trace()
+                # rospy.loginfo("waiting for the ball to land")
+                time.sleep(0.01)
+                self.step_srv()
+                self.flying_speed += self.ball_speed
+                self.ball_xyz = self.get_body_com("musc-le-ball::ball")
+            self.flying_speed /= i
         # msg = Int32()
         # msg.data = 100
         # self.step_pub.publish(msg)
-        future = self.step_srv(TriggerRequest())
+        if self.step_gazebo:
+            future = self.step_srv(TriggerRequest())
         #rclpy.spin_until_future_complete(self.node, future)
 
     def get_observations(self):
@@ -188,14 +215,26 @@ class MuscThrowerEnv(MuscEnv):
         self.ball_hit_location = None
         self.ball_xyz = self.prev_ball_xyz = None
         self.upper_link_xyz = None
-        req = TriggerRequest()
-        future = self.atach_srv(req)
+
         #rclpy.spin_until_future_complete(self.node, future)
         # import pdb; pdb.set_trace()
         self.ball_detached = False
+        rospy.loginfo("Resetting simulation...")
+        req = EmptyRequest()
+        future = self.reset_srv(req)
+
+        req = TriggerRequest()
+        future = self.atach_srv(req)
+        #rclpy.spin_until_future_complete(self.node, future)
 
         req = EmptyRequest()
-        future = self.unpause_srv(req)
+        if not self.step_gazebo:
+            future = self.pause_srv(req)
+        else:
+            self.unpause_srv(req)
+
+            #rclpy.spin_until_future_complete(self.node, future)
+
         #rclpy.spin_until_future_complete(self.node, future)
         #     #rclpy.spin_until_future_complete(self.node, future)
 
