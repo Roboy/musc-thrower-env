@@ -6,6 +6,7 @@ from gym.utils import seeding
 import rospy
 from std_srvs.srv import Empty, Trigger, EmptyRequest, TriggerRequest
 from std_msgs.msg import Float64
+from gazebo_msgs.srv import SetModelConfigurationRequest, SetModelConfiguration
 import time
 
 class MuscThrowerEnv(MuscEnv):
@@ -15,6 +16,7 @@ class MuscThrowerEnv(MuscEnv):
         self.ball_sub = rospy.Subscriber("/roboy/simulation/ball/speed", Float64, self.ball_speed_cb)
         self.detach_srv = rospy.ServiceProxy("/roboy/simulation/joint/detach", Trigger)
         self.atach_srv = rospy.ServiceProxy("/roboy/simulation/joint/atach", Trigger)
+        self.model_config_srv = rospy.ServiceProxy("/gazebo/set_model_configuration", SetModelConfiguration)
         # self.step_pub = self.node.create_publisher(Int32, "/roboy/simulation/step")
         # self.detach_pub = self.node.create_publisher(Bool, "/roboy/simulation/joint/detach")
 
@@ -26,13 +28,15 @@ class MuscThrowerEnv(MuscEnv):
         # self.delete_request = DeleteModel.Request()
         # self.delete_request.model_name = self.spawn_request.model_name
 
-        low = np.array([-2.5, -2.50, -2.50, -2.50, -1])
-        high = np.array([2.50, 2.50, 2.50, 2.50, 1])
+        low = np.array([-5.0, -5.0, -1.5, -1.5, -1])
+        high = np.array([5.0, 5.0, 1.5, 1.5, 1])
+        # self.action_space = spaces.MultiDiscrete([100,100,30,30,2])
+
         self.action_space = spaces.Box(low=low, high=high, dtype=np.float32) # spaces.MultiDiscrete([500, 500, 500, 500, 2])
         # self.action_space =spaces.MultiDiscrete([500, 500, 500, 500, 5])
         # self.action_space = spaces.Box(np.array([0]*5), np.array([500]*5))
-        low = np.array([ -1.0472, -1.39626,-5.0, -5.0])# , (-1)*np.inf, (-1)*np.inf, (-1)*np.inf])
-        high = np.array([1.0472, 1.39626,5.0, 5.0])#, np.inf, np.inf, np.inf])
+        low = np.array([ -1.0472, -1.39626,-50.0, -50.0])# , (-1)*np.inf, (-1)*np.inf, (-1)*np.inf])
+        high = np.array([1.0472, 1.39626,50.0, 50.0])#, np.inf, np.inf, np.inf])
         self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
         # self.joint_pos = None
@@ -45,9 +49,20 @@ class MuscThrowerEnv(MuscEnv):
         self.ball_hit_ground = False
         self.ball_hit_location = None
         self.ball_speed = 0
-        super().__init__(4, False)
+
+        self.config = SetModelConfigurationRequest()
+        self.config.joint_names = ["lower_joint", "upper_joint"]
+        self.config.model_name = "musc-le-ball"
+        self.config.joint_positions = [-0.3536, 1.3963]
         self.step_gazebo = False
+
+        super().__init__(4, False)
         self.base_xyz = self.get_body_com("musc-le-ball::base")
+        self.goal = 2.0
+
+        # req = EmptyRequest()
+        # self.unpause_srv(req)
+
         print("init done")
 
     def seed(self, seed=None):
@@ -78,11 +93,18 @@ class MuscThrowerEnv(MuscEnv):
 
         if self.ball_hit_ground:
             print("hit")
-            reward = abs(ball_y)
-            # reward = self.flying_speed
+            # reward = abs(ball_y)
+            # reward = self.goal - ball_y
             done = True
-        else:
+        # else:
+        #     reward = 0.0 #self.ball_speed
+
+        if ball_y < self.goal and ball_y > 0.2:
+            reward = ball_y/self.goal
+        elif ball_y < 0.2:
             reward = 0.0
+        else:
+            reward = 1.0 - (ball_y - self.goal)/self.goal
         #     ball_hit_xy = self.ball_hit_location[:2]
         #     reward = np.linalg.norm(ball_hit_xy - ee_xy)
         # elif self.ball_detached:  # flying
@@ -118,9 +140,11 @@ class MuscThrowerEnv(MuscEnv):
         # time.sleep(1)
         # print("Action: ")
         # print(action)
-        self.motor_command.set_points = [(x+2.5)*100.0 for x in action[:4]]
+        self.motor_command.set_points = [x*20.0 for x in action[:4]]
         self.command_pub.publish(self.motor_command)
-        time.sleep(0.5)
+        time.sleep(0.2)
+        self.flying_speed = self.ball_speed
+        print(action)
         if (not self.ball_detached and action[-1] > 0.9):
             # import pdb; pdb.set_trace()
             print("RELEASED")
@@ -139,7 +163,8 @@ class MuscThrowerEnv(MuscEnv):
                 # import pdb; pdb.set_trace()
                 # rospy.loginfo("waiting for the ball to land")
                 time.sleep(0.01)
-                self.step_srv()
+                if self.step_gazebo:
+                    self.step_srv()
                 self.flying_speed += self.ball_speed
                 self.ball_xyz = self.get_body_com("musc-le-ball::ball")
             self.flying_speed /= i
@@ -161,6 +186,7 @@ class MuscThrowerEnv(MuscEnv):
         self.joint_pos = [self.get_joint_pos("lower_joint"), self.get_joint_pos("lower_joint")]
         self.joint_vel = [self.get_joint_vel("lower_joint"), self.get_joint_vel("lower_joint")]
         obs = np.concatenate((self.joint_pos, self.joint_vel)) #np.append(np.concatenate((self.joint_pos, self.joint_vel)), ball_xyz)
+        # obs = np.append(obs, self.flying_speed)
         # print("Observation: ")
         # print(obs)
         return obs
@@ -220,18 +246,25 @@ class MuscThrowerEnv(MuscEnv):
         # import pdb; pdb.set_trace()
         self.ball_detached = False
         rospy.loginfo("Resetting simulation...")
-        req = EmptyRequest()
-        future = self.reset_srv(req)
+        self.motor_command.set_points = [0.0]*4
+        self.command_pub.publish(self.motor_command)
+
+
+        # req = EmptyRequest()
+        # future = self.reset_srv(req)
 
         req = TriggerRequest()
         future = self.atach_srv(req)
+
+        self.model_config_srv(self.config)
+
         #rclpy.spin_until_future_complete(self.node, future)
 
         req = EmptyRequest()
-        if not self.step_gazebo:
+        if self.step_gazebo:
             future = self.pause_srv(req)
-        else:
-            self.unpause_srv(req)
+        # else:
+        #     self.unpause_srv(req)
 
             #rclpy.spin_until_future_complete(self.node, future)
 
@@ -251,7 +284,7 @@ class MuscThrowerEnv(MuscEnv):
         #
         # self.detach_pub = self.node.create_publisher(Bool, "/roboy/simulation/joint/detach")
         # #rclpy.spin_until_future_complete(self.node, future)
-
+        time.sleep(0.1)
 
         print("done")
 
