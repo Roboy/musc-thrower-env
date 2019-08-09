@@ -66,15 +66,15 @@ class MuscEnv(gym.Env):
         return [seed]
 
 
-    def do_simulation(self, action):
-
-        self.motor_command.set_points = [x*1.0 for x in action]
-        self.command_pub.publish(self.motor_command)
-        rospy.loginfo("Motor command: " + self.motor_command.set_points)
-
-        if self.step_gazebo:
-            future = self.step_srv(TriggerRequest())
-            # #rclpy.spin_until_future_complete(self.node, future)
+    # def do_simulation(self, action):
+    #
+    #     self.motor_command.set_points = [x*1.0 for x in action]
+    #     self.command_pub.publish(self.motor_command)
+    #     rospy.loginfo("Motor command: " + self.motor_command.set_points)
+    #
+    #     if self.step_gazebo:
+    #         future = self.step_srv(TriggerRequest())
+    #         # #rclpy.spin_until_future_complete(self.node, future)
 
     def get_joint_vel(self, name):
         req = GetJointVelocityRequest()

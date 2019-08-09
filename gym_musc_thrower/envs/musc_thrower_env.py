@@ -7,6 +7,7 @@ import rospy
 from std_srvs.srv import Empty, Trigger, EmptyRequest, TriggerRequest
 from std_msgs.msg import Float64
 from gazebo_msgs.srv import SetModelConfigurationRequest, SetModelConfiguration
+from gazebo_msgs.msg import LinkStates
 import time
 
 class MuscThrowerEnv(MuscEnv):
@@ -14,6 +15,7 @@ class MuscThrowerEnv(MuscEnv):
 
     def __init__(self):
         self.ball_sub = rospy.Subscriber("/roboy/simulation/ball/speed", Float64, self.ball_speed_cb)
+        # self.link_states_sub = rospy.Subscriber("/gazebo/link_states", LinkStates, self.link_states_cb)
         self.detach_srv = rospy.ServiceProxy("/roboy/simulation/joint/detach", Trigger)
         self.atach_srv = rospy.ServiceProxy("/roboy/simulation/joint/atach", Trigger)
         self.model_config_srv = rospy.ServiceProxy("/gazebo/set_model_configuration", SetModelConfiguration)
@@ -28,8 +30,10 @@ class MuscThrowerEnv(MuscEnv):
         # self.delete_request = DeleteModel.Request()
         # self.delete_request.model_name = self.spawn_request.model_name
 
-        low = np.array([-5.0, -5.0, -1.5, -1.5, -1])
-        high = np.array([5.0, 5.0, 1.5, 1.5, 1])
+        low = np.array([-10.0, -10.0, -0.5, -0.5, -1])
+        high = np.array([10.0, 10.0, 0.5, 0.5, 1])
+        self.factor = 10.0
+        self.add = [10.0, 0.5]
         # self.action_space = spaces.MultiDiscrete([100,100,30,30,2])
 
         self.action_space = spaces.Box(low=low, high=high, dtype=np.float32) # spaces.MultiDiscrete([500, 500, 500, 500, 2])
@@ -58,6 +62,7 @@ class MuscThrowerEnv(MuscEnv):
 
         super().__init__(4, False)
         self.base_xyz = self.get_body_com("musc-le-ball::base")
+        self.ball_xyz = self.get_body_com("musc-le-ball::ball")
         self.goal = 2.0
 
         # req = EmptyRequest()
@@ -70,6 +75,9 @@ class MuscThrowerEnv(MuscEnv):
         return [seed]
 
     def step(self, action):
+
+        print("step:")
+        print(action)
         self.curr_episode += 1
         print("episode %i"%(self.curr_episode))
 
@@ -98,13 +106,22 @@ class MuscThrowerEnv(MuscEnv):
             done = True
         # else:
         #     reward = 0.0 #self.ball_speed
+        reward = 0.0
+        if done:
+            if ball_y < 0.2 or ball_y >= 2*self.goal:
+                reward = 0.0
+            elif ball_y <= self.goal: # and ball_y > 0.2:
+                reward = ball_y/self.goal
 
-        if ball_y < self.goal and ball_y > 0.2:
-            reward = ball_y/self.goal
-        elif ball_y < 0.2:
-            reward = 0.0
-        else:
-            reward = 1.0 - (ball_y - self.goal)/self.goal
+            else:
+                reward = 1.0 - (ball_y - self.goal)/self.goal
+        # else:
+
+
+        #     if self.flying_speed > 0:
+        #         reward = 0.1
+        #     else:
+        #         reward = -1.0
         #     ball_hit_xy = self.ball_hit_location[:2]
         #     reward = np.linalg.norm(ball_hit_xy - ee_xy)
         # elif self.ball_detached:  # flying
@@ -131,21 +148,31 @@ class MuscThrowerEnv(MuscEnv):
         print("\n====== \n reward: %f \n======= \n"%reward)
 
         observations = self.get_observations()
+        if np.isnan(observations).any():
+            print("OBSERVATION IS NAN!")
+            raise
 
+        # if done:
+        #     import pdb; pdb.set_trace()
 
-        return observations, reward, done, dict(reward=reward, episode=self.curr_episode)
+        return observations, reward, done, {}
 
     def do_simulation(self, action):
 
         # time.sleep(1)
-        # print("Action: ")
-        # print(action)
-        self.motor_command.set_points = [x*20.0 for x in action[:4]]
+        print("do_simulation: ")
+        print(action)
+        # import pdb; pdb.set_trace()
+        self.motor_command.set_points[0] = float((self.add[0] + action[0])*self.factor)
+        self.motor_command.set_points[1] = float((self.add[0] + action[1])*self.factor)
+        self.motor_command.set_points[2] = float((self.add[1] + action[2])*self.factor)
+        self.motor_command.set_points[3] = float((self.add[1] + action[3])*self.factor) # for x in action[:4]]
+
         self.command_pub.publish(self.motor_command)
-        time.sleep(0.2)
+        time.sleep(0.3)
         self.flying_speed = self.ball_speed
         print(action)
-        if (not self.ball_detached and action[-1] > 0.9):
+        if (not self.ball_detached and action[-1] > 0.5):
             # import pdb; pdb.set_trace()
             print("RELEASED")
             # msg = Bool()
@@ -162,7 +189,7 @@ class MuscThrowerEnv(MuscEnv):
                 i += 1
                 # import pdb; pdb.set_trace()
                 # rospy.loginfo("waiting for the ball to land")
-                time.sleep(0.01)
+                time.sleep(0.3)
                 if self.step_gazebo:
                     self.step_srv()
                 self.flying_speed += self.ball_speed
@@ -197,11 +224,11 @@ class MuscThrowerEnv(MuscEnv):
     def link_states_cb(self, msg):
         # print("updated link states")
         ball_idx = msg.name.index("musc-le-ball::ball")
-        upper_link_idx = msg.name.index("musc-le-ball::upper_arm")
+        # upper_link_idx = msg.name.index("musc-le-ball::upper_arm")
         ball_com = msg.pose[ball_idx].position
-        upper_link_com = msg.pose[upper_link_idx].position
+        # upper_link_com = msg.pose[upper_link_idx].position
         self.ball_xyz = np.array([ball_com.x, ball_com.y, ball_com.z])
-        self.upper_link_xyz = np.array([upper_link_com.x, upper_link_com.y, upper_link_com.z])
+        # self.upper_link_xyz = np.array([upper_link_com.x, upper_link_com.y, upper_link_com.z])
 
     # def joint_states_cb(self, msg):
     #     # print("updated joint states")
@@ -284,9 +311,11 @@ class MuscThrowerEnv(MuscEnv):
         #
         # self.detach_pub = self.node.create_publisher(Bool, "/roboy/simulation/joint/detach")
         # #rclpy.spin_until_future_complete(self.node, future)
-        time.sleep(0.1)
+        time.sleep(0.3)
 
         print("done")
+
+        return self.get_observations()
 
     def render(self, mode='human'):
         pass
