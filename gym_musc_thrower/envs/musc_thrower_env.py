@@ -76,8 +76,8 @@ class MuscThrowerEnv(MuscEnv):
 
     def step(self, action):
 
-        print("step:")
-        print(action)
+        # print("step:")
+        # print(action)
         self.curr_episode += 1
         print("episode %i"%(self.curr_episode))
 
@@ -100,7 +100,7 @@ class MuscThrowerEnv(MuscEnv):
             self.ball_hit_location = self.ball_xyz
 
         if self.ball_hit_ground:
-            print("hit")
+            # print("hit")
             # reward = abs(ball_y)
             # reward = self.goal - ball_y
             done = True
@@ -159,9 +159,9 @@ class MuscThrowerEnv(MuscEnv):
 
     def do_simulation(self, action):
 
-        # time.sleep(1)
-        print("do_simulation: ")
-        print(action)
+        time.sleep(0.1)
+        # print("do_simulation: ")
+        # print(action)
         # import pdb; pdb.set_trace()
         self.motor_command.set_points[0] = float((self.add[0] + action[0])*self.factor)
         self.motor_command.set_points[1] = float((self.add[0] + action[1])*self.factor)
@@ -171,10 +171,10 @@ class MuscThrowerEnv(MuscEnv):
         self.command_pub.publish(self.motor_command)
         time.sleep(0.3)
         self.flying_speed = self.ball_speed
-        print(action)
+        # print(action)
         if (not self.ball_detached and action[-1] > 0.5):
             # import pdb; pdb.set_trace()
-            print("RELEASED")
+            # print("RELEASED")
             # msg = Bool()
             # msg.data = True
             # self.detach_pub.publish(msg)
@@ -183,18 +183,18 @@ class MuscThrowerEnv(MuscEnv):
             self.ball_detached = True
             self.ball_xyz = self.get_body_com("musc-le-ball::ball")
             # import pdb; pdb.set_trace()
-            self.flying_speed = 0
-            i = 0.0
-            while self.ball_xyz[2] >= 0.055:
-                i += 1
-                # import pdb; pdb.set_trace()
-                # rospy.loginfo("waiting for the ball to land")
-                time.sleep(0.3)
-                if self.step_gazebo:
-                    self.step_srv()
-                self.flying_speed += self.ball_speed
-                self.ball_xyz = self.get_body_com("musc-le-ball::ball")
-            self.flying_speed /= i
+            # self.flying_speed = 0
+            # i = 0.0
+            # while self.ball_xyz[2] >= 0.055:
+            #     i += 1
+            #     # import pdb; pdb.set_trace()
+            #     # rospy.loginfo("waiting for the ball to land")
+            #     time.sleep(0.3)
+            #     if self.step_gazebo:
+            #         self.step_srv()
+            #     self.flying_speed += self.ball_speed
+            #     self.ball_xyz = self.get_body_com("musc-le-ball::ball")
+            # self.flying_speed /= i
         # msg = Int32()
         # msg.data = 100
         # self.step_pub.publish(msg)
@@ -209,7 +209,7 @@ class MuscThrowerEnv(MuscEnv):
         # while (self.joint_pos is None):
         #     rclpy.spin_once(self.node)
         #     # self.step_pub.publish(msg)
-        ball_xyz = self.get_body_com("musc-le-ball::ball")
+        # ball_xyz = self.get_body_com("musc-le-ball::ball")
         self.joint_pos = [self.get_joint_pos("lower_joint"), self.get_joint_pos("lower_joint")]
         self.joint_vel = [self.get_joint_vel("lower_joint"), self.get_joint_vel("lower_joint")]
         obs = np.concatenate((self.joint_pos, self.joint_vel)) #np.append(np.concatenate((self.joint_pos, self.joint_vel)), ball_xyz)
@@ -262,7 +262,7 @@ class MuscThrowerEnv(MuscEnv):
     #     self.model_exists = False
 
     def reset(self):
-        print("reset simulation")
+        # print("reset simulation")
         # future = self.reset_srv(Empty.Request())
         self.ball_hit_ground = False
         self.ball_hit_location = None
@@ -313,7 +313,7 @@ class MuscThrowerEnv(MuscEnv):
         # #rclpy.spin_until_future_complete(self.node, future)
         time.sleep(0.3)
 
-        print("done")
+        # print("done")
 
         return self.get_observations()
 
